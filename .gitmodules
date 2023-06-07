@@ -1,0 +1,6 @@
+[submodule "cpp-msgenv-sdbus.git"]
+	path = cpp-msgenv-sdbus.git
+	url = git@github.com:IPSME/cpp-msgenv-sdbus.git
+[submodule "cpp-msg_cache-dedup.git"]
+	path = cpp-msg_cache-dedup.git
+	url = git@github.com:IPSME/cpp-msg_cache-dedup.git
