@@ -4,13 +4,11 @@
 .DEFAULT_GOAL := all
 
 OUT=reflector-tcp-sdbus
-#INC=-Icpp-msgenv-sdbus.git -Iinclude
-INC=-Iinclude
+INC=-Icpp-msgenv-sdbus.git -Icpp-msg_cache-dedup.git -Iinclude
 LIB=$(shell pkg-config --cflags --libs libsystemd)
 
 all: ## build the project, 
-	g++ -std=c++17 -Wall -O0 -g -o ${OUT} main.cpp ${INC} ${LIB} -pthread
-#	g++ -std=c++17 -Wall -O0 -g -o ${OUT} main.cpp JSON_MsgDiscovery.cpp cpp-msgenv-sdbus.git/IPSME_MsgEnv.cpp ${INC} ${LIB}
+	g++ -std=c++17 -Wall -O0 -g -o ${OUT} main.cpp cpp-msgenv-sdbus.git/IPSME_MsgEnv.cpp cpp-msg_cache-dedup.git/msg_cache-dedup.cpp ${INC} ${LIB} -pthread
 
 clean: ## clean the project, 
 	rm -f ${OUT}

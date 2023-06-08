@@ -1,11 +1,6 @@
 //
-// async_tcp_echo_server.cpp
+// async_tcp_echo_server.cpp -> main.cpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~
-//
-// Copyright (c) 2003-2021 Christopher M. Kohlhoff (chris at kohlhoff dot com)
-//
-// Distributed under the Boost Software License, Version 1.0. (See accompanying
-// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
 #include <cstdlib>
@@ -14,10 +9,10 @@
 #include <utility>
 #include <set>
 
-//#include "duplicate.h"
+#include "IPSME_MsgEnv.h"
+#include "msg_cache-dedup.h"
 
-//duplicate g_dup_asio;
-//duplicate g_dup_zmq;
+duplicate g_duplicate;
 
 #include <asio/ts/buffer.hpp>
 #include <asio/ts/internet.hpp>
@@ -33,7 +28,7 @@ enum { max_length = 0xffff };
 char msg_[max_length];
 
 //----------------------------------------------------------------------------------------------------------------
-// pragma mark asio -> zmq
+// pragma mark asio -> sdbus
 
 void do_read(t_ptr_socket ptr_socket)
 {
@@ -55,17 +50,14 @@ void do_read(t_ptr_socket ptr_socket)
 		
 		std::string str_msg= std::string(msg_, length);
 		
-		// if (true == g_dup_asio.exists(str_msg))
-		if (false)
+		if (true == g_duplicate.exists(str_msg))
 			std::cerr << "async_read_some(): asio ->| *DUP -- [" << str_msg << "]\n";
 
 		else
 		{
-			std::cerr << "handler_msg(kpks_recvd): asio -> zmq -- [" << str_msg << "]\n";
+			std::cerr << "handler_msg(kpks_recvd): asio -> sdbus -- [" << str_msg << "]\n";
 
-			//g_dup_zmq.cache(str_msg, t_entry_context(30s));
-			
-			//msg::pubsub->publish(str_msg.c_str(), str_msg.length());
+			IPSME_MsgEnv::publish("s", str_msg.c_str());
 		}
 
 		do_read(ptr_socket);
@@ -89,28 +81,49 @@ void do_write(t_ptr_socket ptr_socket, std::string str_msg)
 }
 
 //----------------------------------------------------------------------------------------------------------------
-// pragma mark asio <- zmq
+// pragma mark asio <- sdbus
 
-/*
-static void handler_(IMessenger* msgr, const char * const kpks_recvd, size_t zt_len)
+bool handler_str_(sd_bus_message* p_msg, std::string str_msg)
 {
-	std::string str_recvd= std::string(kpks_recvd, zt_len);
+	std::cerr << __func__ << ": asio[" << g_set_sockets.size() << "] <- sdbus -- [" << str_msg.c_str() << "]\n";
 	
-	//TODO: What encoding does nodejs use? should the code check for NSUTF16StringEncoding ?1
-	
-	if (true == g_dup_zmq.exists(str_recvd)) {
-		// NSLog(@"handler_msg(kpks_recvd): *DUP |<- zmw -- [%s]", str_recvd.c_str());
-		return;
-	}
-	
-	std::cerr << "handler_msg(kpks_recvd): asio[" << g_set_sockets.size() << "] <- zmq -- [" << str_recvd.c_str() << "]\n";
-	
-	g_dup_asio.cache(str_recvd, t_entry_context(30s));
+	g_duplicate.cache(str_msg, t_entry_context(30s));
 	
 	for (auto it : g_set_sockets)
-		do_write(it, str_recvd);
+		do_write(it, str_msg);
+
+    return true;
 }
-*/
+
+std::string bus_message_str(sd_bus_message* p_msg) {
+    const char* psz= nullptr;
+    int i_r = sd_bus_message_read_basic(p_msg, SD_BUS_TYPE_STRING, &psz);
+    if (i_r < 0)
+        throw i_r;
+
+    return psz;
+}
+
+void handler_(sd_bus_message* p_msg)
+{
+    // printf("%s: \n", __func__);
+
+    try {
+        char ch_type;
+        if (sd_bus_message_peek_type(p_msg, &ch_type, nullptr) && (ch_type=='s') && handler_str_(p_msg, bus_message_str(p_msg) ))
+            return;
+
+    }
+    catch (int &i_r) {
+        printf("ERR: error is message execution: %s \n", strerror(-i_r));
+    }
+    catch (...) {
+        printf("ERR: error is message execution \n");
+        return;
+    }
+
+    printf("%s: DROP! \n", __func__);
+}
 
 //----------------------------------------------------------------------------------------------------------------
 // pragma mark server
@@ -173,17 +186,9 @@ int main(int argc, char* argv[])
 	{
 		// -----
 		
-//		std::cerr << "main(): " << "Connecting ..." << "\n";
+		std::cerr << __func__ << ": " << "Connecting ..." << "\n";
 
-//		std::shared_ptr<MsgQ> mq= std::make_shared<MsgQ>(eeid_ID_);
-//		
-//		t_port_pair port_pair(2323, 2322);
-//		msg::pubsub->connect(mq, "ipsme-trivial", port_pair); // "localhost", "iotasrv1.local"
-//		
-//		MsgQ::t_Messengers messengers= { msg::pubsub };
-//		mq->poll_messengers(messengers, handler_);
-//		
-//		msg::pubsub->subscribe("");
+		IPSME_MsgEnv::subscribe(&handler_);
 
 		// -----
 		
@@ -192,11 +197,22 @@ int main(int argc, char* argv[])
 		int i_port= std::atoi(argv[1]);
 		server s(ioctx, i_port);
 
-		std::cout << "main(): " << str_exec << " listening on [" << i_port << "]\n";
+		std::cout << __func__ << ": " << str_exec << " listening on [" << i_port << "]\n";
 
-		std::cerr << "main(): " << "Running ..." << "\n";
+		std::cerr << __func__ << ": " << "Running ..." << "\n";
 
-		ioctx.run();
+		// ioctx.run();
+		while (true) 
+		{
+			ioctx.poll();
+			IPSME_MsgEnv::process_requests();
+
+			// if (ioctx.stopped() && ioctx.poll_one() == 0)
+			// 	break;
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		}
+
 	}
 	catch (std::exception& e)
 	{
